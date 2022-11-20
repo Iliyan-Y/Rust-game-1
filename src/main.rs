@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::{prelude::*, transform};
 // used for physics
 use bevy_rapier2d::prelude::*;
 // used for input capturing
@@ -17,7 +17,7 @@ fn main() {
     .add_plugin(InputManagerPlugin::<Action>::default())
     .add_plugin(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(200.0))
     .insert_resource(RapierConfiguration {
-      gravity: Vec2::new(5.0, -10.0),
+      gravity: Vec2::new(0.0, 0.0), // set to negative value to apply constant gravity
       ..default()
     })
     .add_plugin(RapierDebugRenderPlugin::default())
@@ -37,6 +37,7 @@ struct Player;
 #[derive(Actionlike, PartialEq, Eq, Clone, Copy, Hash, Debug)]
 enum Action {
   Move,
+  Jump,
 }
 
 // runs once at start
@@ -53,12 +54,18 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     })
     .insert(InputManagerBundle::<Action> {
       action_state: ActionState::default(),
-      input_map: InputMap::new([(KeyCode::Space, Action::Move)]),
+      input_map: InputMap::default()
+        .insert(DualAxis::left_stick(), Action::Move)
+        .insert(VirtualDPad::wasd(), Action::Move)
+        .insert(VirtualDPad::arrow_keys(), Action::Move)
+        .set_gamepad(Gamepad { id: 0 })
+        .insert(KeyCode::Space, Action::Jump)
+        .build(),
     })
     .insert(RigidBody::Dynamic)
     .insert(Collider::ball(32.0))
     .insert(ExternalForce {
-      force: Vec2::new(5.0, 1.0),
+      force: Vec2::ZERO,
       torque: 0.0,
     })
     .insert(Damping {
@@ -70,9 +77,30 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     .insert(Player); // will tag the entity and we can query it in other systems
 }
 
-fn move_player(query: Query<&ActionState<Action>, With<Player>>) {
-  let action_state = query.single();
-  if action_state.just_pressed(Action::Move) {
-    println!("MOVING")
+const MOVE_FORCE: f32 = 1500.0;
+
+fn move_player(
+  mut query: Query<
+    (
+      &ActionState<Action>,
+      &mut ExternalForce,
+      &mut Transform,
+      &mut Damping,
+    ),
+    With<Player>,
+  >,
+  time: Res<Time>,
+) {
+  for (action_state, mut external_force, mut transform, mut damping) in &mut query {
+    if action_state.just_pressed(Action::Jump) {
+      println!("Jumping");
+
+      transform.translation = Vec3::ZERO;
+      // todo find a way to permanently stop
+      damping.linear_damping = 100.0; // stop the boll
+    }
+
+    let axis_vector = action_state.clamped_axis_pair(Action::Move).unwrap().xy();
+    external_force.force = axis_vector * MOVE_FORCE * time.delta_seconds()
   }
 }
